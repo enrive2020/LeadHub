@@ -70,6 +70,38 @@ class Settings(BaseSettings):
     # Потолок задержки, сек. Без него 10-я попытка ушла бы на сутки вперёд.
     retry_max_delay_seconds: float = 300.0
 
+    # --- Google Sheets ---
+    # Файл ключа сервис-аккаунта. Относительный путь — от корня проекта.
+    google_credentials_file: Path | None = None
+    # ID таблицы из её адреса: docs.google.com/spreadsheets/d/<ID>/edit
+    google_sheet_id: str | None = None
+    # Имя листа внутри таблицы. Создастся сам, если его нет.
+    google_worksheet_name: str = "Лиды"
+
+    # Часовой пояс для дат, которые читает человек. Внутри система живёт
+    # в UTC, а владельцу показываем его местное время.
+    display_timezone: str = "Europe/Moscow"
+
+    @property
+    def google_credentials_path(self) -> Path | None:
+        """Абсолютный путь к файлу ключа."""
+        if self.google_credentials_file is None:
+            return None
+        if self.google_credentials_file.is_absolute():
+            return self.google_credentials_file
+        return BASE_DIR / self.google_credentials_file
+
+    @property
+    def sheets_configured(self) -> bool:
+        """Настроена ли интеграция с Google Sheets.
+
+        Позволяет запускать проект без Google вообще: шаг просто не встанет
+        в пайплайн. Полезно и для разработки, и для того, чтобы человек,
+        клонировавший репозиторий, увидел работающую систему без возни с ключами.
+        """
+        path = self.google_credentials_path
+        return bool(self.google_sheet_id) and path is not None and path.exists()
+
     @property
     def db_path_absolute(self) -> Path:
         """Абсолютный путь к БД — им и пользуется код, работающий с файлом."""

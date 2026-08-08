@@ -10,16 +10,35 @@
 добавим её явно, а не будем полагаться на порядок в списке.
 """
 
+from app.config import settings
+from app.logging_setup import get_logger
 from app.pipeline.base import Step
 from app.pipeline.steps.log_step import LogStep
+from app.pipeline.steps.sheets_step import SheetsStep
+
+logger = get_logger(__name__)
 
 #: Шаги, которые ставятся каждому новому лиду.
 ENABLED_STEPS: list[Step] = [
     LogStep(),
-    # Фаза 2.2: SheetsStep()
-    # Фаза 3:   TelegramStep()
-    # Фаза 4:   QualifyStep()
+    # Фаза 3: TelegramStep()
+    # Фаза 4: QualifyStep()
 ]
+
+# Шаг подключается только если интеграция настроена. Иначе проект остаётся
+# запускаемым без Google вообще: приём и очередь работают, а человек,
+# клонировавший репозиторий, видит живую систему, не заводя сервис-аккаунт.
+#
+# Обрати внимание, ЧЕГО здесь нет: проверки "настроен ли Google" внутри самого
+# шага при каждом выполнении. Решение принимается один раз при старте, а не
+# на каждом лиде.
+if settings.sheets_configured:
+    ENABLED_STEPS.append(SheetsStep())
+else:
+    logger.warning(
+        "Google Sheets не настроен (нужны GOOGLE_SHEET_ID и файл ключа) — "
+        "шаг записи в таблицу отключён"
+    )
 
 #: Имена шагов — их пишем в очередь при приёме лида.
 STEP_NAMES: list[str] = [step.name for step in ENABLED_STEPS]

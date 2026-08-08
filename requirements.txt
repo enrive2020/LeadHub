@@ -8,3 +8,7 @@ pydantic-settings>=2.6,<3
 fastapi>=0.115,<1          # веб-фреймворк: роутинг + валидация через pydantic + авто-документация
 uvicorn[standard]>=0.32,<1 # ASGI-сервер, который слушает порт и запускает приложение
 python-multipart>=0.0.12   # разбор данных из HTML-форм (их шлют Tilda, WordPress и прочие)
+
+# Фаза 2: доставка лидов в Google Sheets
+gspread>=6.1,<7            # человеческая обёртка над Google Sheets API
+tzdata>=2024.1             # база часовых поясов: в Windows её нет в системе

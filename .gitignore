@@ -3,8 +3,12 @@
 .env.local
 *.key
 *.pem
-credentials.json          # ключ Google service account (появится в Фазе 2)
+# Ключ Google service account. ВНИМАНИЕ: в .gitignore комментарий работает
+# только с начала строки — дописать "# пояснение" в конец правила нельзя,
+# иначе оно молча перестанет срабатывать.
+credentials.json
 service_account*.json
+*-service-account.json
 
 # --- Виртуальное окружение ---
 .venv/
