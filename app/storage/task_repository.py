@@ -304,6 +304,40 @@ def enqueue_missing(steps: list[str]) -> int:
     return created
 
 
+def reopen_done(lead_id: str, steps: list[str]) -> int:
+    """Возвращает УЖЕ ВЫПОЛНЕННЫЕ задачи лида в очередь. Отдаёт число возвращённых.
+
+    Нужен, когда после завершения шага появились данные, ради которых шаг
+    стоит прогнать ещё раз: оценка AI досчиталась после того, как строка ушла
+    в таблицу без неё. Трогает только задачи в статусе done — pending/dead
+    живут по своим правилам (первые и так выполнятся, вторые ждут requeue).
+
+    Сам шаг обязан быть готов к повторному запуску — это то же требование
+    идемпотентности, что и всегда: очередь у нас at-least-once.
+    """
+    if not steps:
+        return 0
+
+    now = _iso(_now())
+    # Подстановка через f-string касается только ЧИСЛА знаков "?", сами значения
+    # уходят параметрами — SQL-инъекции тут нет.
+    placeholders = ",".join("?" for _ in steps)
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"""
+            UPDATE lead_tasks
+               SET status = 'pending', next_attempt_at = ?, updated_at = ?
+             WHERE lead_id = ? AND status = 'done' AND step IN ({placeholders})
+            """,
+            (now, now, lead_id, *steps),
+        )
+        reopened = cursor.rowcount
+        if reopened:
+            _refresh_lead_status(conn, lead_id)
+
+    return reopened
+
+
 def get_status(lead_id: str, step: str) -> str | None:
     """Статус конкретного шага для конкретного лида. None — задачи нет.
 

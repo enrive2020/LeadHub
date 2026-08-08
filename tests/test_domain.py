@@ -1,5 +1,7 @@
 """Ядро: нормализация контактов и защита от дублей."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from app.domain.lead import build_lead, make_dedup_key
@@ -70,6 +72,45 @@ def test_внешний_id_приоритетнее_содержимого():
     первый = make_dedup_key("telegram", external_id="42", payload={"text": "привет"})
     второй = make_dedup_key("telegram", external_id="42", payload={"text": "другой текст"})
     assert первый == второй
+
+
+# --- окно дедупликации -----------------------------------------------------
+
+_PAYLOAD = {"name": "Иван", "phone": "+79001112233", "message": "Нужен сайт"}
+
+
+def test_двойной_клик_внутри_окна_остаётся_дублем():
+    утро = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    вечер = datetime(2026, 3, 10, 21, 0, tzinfo=UTC)
+    assert make_dedup_key(
+        "site_form", payload=_PAYLOAD, window_days=1, moment=утро
+    ) == make_dedup_key("site_form", payload=_PAYLOAD, window_days=1, moment=вечер)
+
+
+def test_та_же_заявка_через_месяц_это_новый_лид():
+    """Ради этого окно и заведено: повторное обращение — не дубль, а клиент."""
+    март = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    апрель = datetime(2026, 4, 10, 12, 0, tzinfo=UTC)
+    assert make_dedup_key(
+        "site_form", payload=_PAYLOAD, window_days=1, moment=март
+    ) != make_dedup_key("site_form", payload=_PAYLOAD, window_days=1, moment=апрель)
+
+
+def test_нулевое_окно_возвращает_старое_поведение():
+    март = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    апрель = datetime(2026, 4, 10, 12, 0, tzinfo=UTC)
+    assert make_dedup_key(
+        "site_form", payload=_PAYLOAD, window_days=0, moment=март
+    ) == make_dedup_key("site_form", payload=_PAYLOAD, window_days=0, moment=апрель)
+
+
+def test_окно_не_трогает_внешние_id():
+    """Сообщение №42 из Telegram — одно и то же навсегда, окно тут ни при чём."""
+    март = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    апрель = datetime(2026, 4, 10, 12, 0, tzinfo=UTC)
+    assert make_dedup_key(
+        "telegram", external_id="42", window_days=1, moment=март
+    ) == make_dedup_key("telegram", external_id="42", window_days=1, moment=апрель)
 
 
 # --- сборка лида -----------------------------------------------------------

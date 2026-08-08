@@ -42,6 +42,10 @@ HEADER = [
 # Колонка с ID лида (B) — по ней проверяем, не записан ли лид уже.
 LEAD_ID_COLUMN = 2
 
+# Первая AI-колонка ("Оценка"). Вычисляем из HEADER, а не пишем числом:
+# при изменении набора колонок константа пересчитается сама.
+AI_COLUMN_START = HEADER.index("Оценка") + 1
+
 # Коды ответа Google, при которых повтор имеет смысл.
 #   429 — превышен лимит запросов (подождать и повторить — штатный сценарий)
 #   5xx — сбой на стороне Google
@@ -169,8 +173,11 @@ class SheetsStep(Step):
             # Тогда правильный ход: хранить у себя отметку "записан в Sheets"
             # и сверяться с таблицей только при подозрении. Сейчас честнее
             # спрашивать источник правды.
-            if lead.id in worksheet.col_values(LEAD_ID_COLUMN):
-                logger.info("Лид %s уже есть в таблице — пропускаю", lead.id[:8])
+            known_ids = worksheet.col_values(LEAD_ID_COLUMN)
+            if lead.id in known_ids:
+                self._fill_ai_cells_if_blank(
+                    worksheet, known_ids.index(lead.id) + 1, lead, qualification
+                )
                 return
 
             worksheet.append_row(
@@ -223,6 +230,42 @@ class SheetsStep(Step):
         # повторить, чем зря похоронить лид.
         raise RetryableError(f"Неизвестная ошибка Google (HTTP {status}): {error}") from error
 
+    def _fill_ai_cells_if_blank(
+        self,
+        worksheet: "Worksheet",
+        row_number: int,
+        lead: Lead,
+        qualification: Qualification | None,
+    ) -> None:
+        """Дозаписывает оценку в уже существующую строку, если её там нет.
+
+        Сценарий: строка ушла в таблицу без оценки (модель тогда лежала),
+        позже модель починили и qualify вернул задачу sheets в очередь.
+        Повторный запуск попадает сюда: строка есть, но AI-ячейки пустые.
+
+        Проверка «ячейка пуста» обязательна. Без неё повторный прогон затирал
+        бы оценку, которая уже была в строке, свежепересчитанной — а владелец
+        мог успеть принять решение по старой. Дозапись — да, перезапись — нет.
+        """
+        if qualification is None:
+            logger.info("Лид %s уже есть в таблице — пропускаю", lead.id[:8])
+            return
+
+        if worksheet.cell(row_number, AI_COLUMN_START).value:
+            logger.info(
+                "Лид %s уже есть в таблице вместе с оценкой — пропускаю", lead.id[:8]
+            )
+            return
+
+        start = rowcol_to_a1(row_number, AI_COLUMN_START)
+        end = rowcol_to_a1(row_number, len(HEADER))
+        worksheet.update(
+            values=[self._ai_cells(qualification)],
+            range_name=f"{start}:{end}",
+            raw=True,
+        )
+        logger.info("Лид %s: оценка дописана в существующую строку", lead.id[:8])
+
     # -- форматирование ---------------------------------------------------
 
     def _to_row(self, lead: Lead, qualification: Qualification | None) -> list[str]:
@@ -249,10 +292,15 @@ class SheetsStep(Step):
         if qualification is None:
             row += ["", "", "", ""]
         else:
-            row += [
-                GRADE_LABELS[qualification.grade],
-                str(qualification.score),
-                qualification.reason,
-                qualification.reply_draft,
-            ]
+            row += self._ai_cells(qualification)
         return row
+
+    @staticmethod
+    def _ai_cells(qualification: Qualification) -> list[str]:
+        """AI-ячейки строки — одним списком, чтобы запись и дозапись не разъехались."""
+        return [
+            GRADE_LABELS[qualification.grade],
+            str(qualification.score),
+            qualification.reason,
+            qualification.reply_draft,
+        ]

@@ -91,6 +91,27 @@ def test_статус_лида_считается_из_задач(db, make_lead)
     assert lead_repository.get_by_id(lead.id).status.value == "done"
 
 
+def test_выполненную_задачу_можно_вернуть_в_очередь(db, make_lead):
+    """Оценка пришла после доставки — шаг должен выполниться заново и дописать её.
+
+    Трогаются только задачи в статусе done: pending и так выполнится,
+    dead ждёт осознанного requeue.
+    """
+    lead = lead_repository.save(make_lead(), steps=["sheets", "log"]).lead
+    for task in task_repository.fetch_ready(limit=10):
+        task_repository.mark_done(task.id, lead.id)
+
+    reopened = task_repository.reopen_done(lead.id, ["sheets"])
+
+    assert reopened == 1
+    assert task_repository.get_status(lead.id, "sheets") == TaskStatus.PENDING
+    assert task_repository.get_status(lead.id, "log") == TaskStatus.DONE
+    assert lead_repository.get_by_id(lead.id).status.value == "processing"
+
+    # Повторный вызов ничего не найдёт: задача уже не в done.
+    assert task_repository.reopen_done(lead.id, ["sheets"]) == 0
+
+
 def test_backfill_ставит_недостающие_задачи(db, make_lead):
     """Добавили шаг в работающую систему — накопленные лиды должны его получить."""
     lead_repository.save(make_lead(), steps=["log"])

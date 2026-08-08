@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from app.config import settings
 from app.domain.lead import Lead, build_lead
 
 # Имя источника. Попадёт в колонку `source` и станет видно в Google Sheets.
@@ -94,6 +95,9 @@ def to_lead(payload: SiteFormPayload, raw: dict[str, Any]) -> Lead:
         email=payload.email,
         message=payload.message,
         # external_id нет: форма на сайте не присваивает заявкам номера,
-        # поэтому дедупликация пойдёт по хешу содержимого.
+        # поэтому дедупликация идёт по хешу содержимого — с окном по времени,
+        # чтобы настоящая повторная заявка через месяц не пропала как «дубль».
+        # Окно передаём отсюда, из адаптера: domain настроек не читает.
         external_id=None,
+        dedup_window_days=settings.dedup_window_days,
     )

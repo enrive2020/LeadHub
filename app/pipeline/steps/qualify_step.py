@@ -9,9 +9,10 @@ from app.domain.lead import Lead
 from app.llm.errors import LLMBadOutput, LLMRejected, LLMUnavailable
 from app.llm.factory import build_provider
 from app.logging_setup import get_logger
+from app.pipeline.ai_wait import AI_REFRESH_STEPS
 from app.pipeline.base import Step
 from app.pipeline.errors import PermanentError, RetryableError
-from app.storage import ai_repository
+from app.storage import ai_repository, task_repository
 
 logger = get_logger(__name__)
 
@@ -50,6 +51,17 @@ class QualifyStep(Step):
             raise RetryableError(f"Модель не выдержала формат ответа: {error}") from error
 
         ai_repository.save(lead.id, qualification, model=self._qualifier.model_name)
+
+        # Обычно доставка ЖДЁТ оценку, и здесь ничего не происходит. Но если
+        # оценка родилась позже доставки (модель чинили, задачу вернули через
+        # requeue) — строка в таблице лежит с пустыми AI-ячейками. Возвращаем
+        # такие шаги в очередь: они идемпотентны и просто допишут пустое.
+        reopened = task_repository.reopen_done(lead.id, AI_REFRESH_STEPS)
+        if reopened:
+            logger.info(
+                "Лид %s: оценка появилась после доставки — обновляю (%s шаг(ов))",
+                lead.id[:8], reopened,
+            )
 
         logger.info(
             "Лид %s оценён: %s (%s/100) — %s",

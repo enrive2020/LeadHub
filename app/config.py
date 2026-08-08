@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Корень проекта = папка на уровень выше этого файла (app/config.py -> LeadHub/).
@@ -53,8 +54,14 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # Общий секрет для проверки входящих вебхуков.
-    # None/пусто = проверка отключена (для локальной разработки).
+    # None/пусто = проверка отключена — только в dev; prod без секрета
+    # не стартует (см. _prod_requires_secret ниже).
     webhook_secret: str | None = None
+
+    # Окно дедупликации для заявок без внешнего id, в днях.
+    # Внутри окна одинаковое содержимое — дубль, в следующем окне — новый лид.
+    # 0 = без окна (одинаковый текст считается дублем навсегда).
+    dedup_window_days: int = 1
 
     # --- Воркер и ретраи ---
     # Как часто воркер заглядывает в очередь, когда работы нет, сек.
@@ -143,6 +150,26 @@ class Settings(BaseSettings):
         """
         path = self.google_credentials_path
         return bool(self.google_sheet_id) and path is not None and path.exists()
+
+    @model_validator(mode="after")
+    def _prod_requires_secret(self) -> "Settings":
+        """В prod пустой секрет вебхука — ошибка конфигурации, а не настройка.
+
+        В dev пустой секрет удобен: локальные проверки без лишних заголовков.
+        В prod та же пустота означает воронку, открытую всему интернету, —
+        причём МОЛЧА: система работает, лиды идут, и дыру не видно.
+
+        Тихое ослабление защиты — худший вид дефолта. Поэтому prod без секрета
+        не запускается вовсе: упасть на старте с внятным текстом дешевле, чем
+        обнаружить спам-ботов в воронке через месяц.
+        """
+        if self.app_env == "prod" and not (self.webhook_secret or "").strip():
+            raise ValueError(
+                "APP_ENV=prod требует непустой WEBHOOK_SECRET: без него приём "
+                "заявок открыт любому, кто узнает адрес. Задай секрет в .env "
+                "и передай его отправителям форм."
+            )
+        return self
 
     @property
     def db_path_absolute(self) -> Path:
