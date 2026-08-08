@@ -37,7 +37,7 @@ from requests.exceptions import RequestException
 
 from app.config import settings
 from app.llm.base import LLMProvider
-from app.llm.errors import LLMRejected, LLMUnavailable
+from app.llm.errors import LLMBadOutput, LLMRejected, LLMUnavailable
 from app.logging_setup import get_logger
 
 logger = get_logger(__name__)
@@ -152,10 +152,29 @@ class OpenAICompatibleProvider(LLMProvider):
         except (KeyError, IndexError, TypeError) as error:
             raise LLMUnavailable(f"Неожиданная структура ответа: {data}") from error
 
+        finish_reason = choices[0].get("finish_reason")
+
+        # ОБРЫВ ПО ЛИМИТУ ТОКЕНОВ. Провайдер сообщает об этом честно, полем
+        # finish_reason="length" — грех не воспользоваться. Без этой проверки
+        # обрыв доезжает до разборщика и выглядит как "невалидный JSON", то есть
+        # как каприз модели. А это не каприз, а наша неверная настройка.
+        #
+        # ГЛАВНАЯ ЛОВУШКА СОВРЕМЕННЫХ МОДЕЛЕЙ: у моделей с рассуждением
+        # (Gemini 3.x, o-серия, Claude с thinking) max_tokens покрывает И
+        # размышление, И ответ. Модель может «продумать» 600 токенов и выдать
+        # 28 видимых — лимит формально не превышен по ощущениям, а ответ
+        # обрезан. Лимит, подобранный для модели без рассуждения, на такой
+        # модели ломается.
+        if finish_reason == "length":
+            raise LLMBadOutput(
+                f"Ответ обрезан по лимиту токенов (max_tokens={settings.llm_max_tokens}). "
+                f"У моделей с рассуждением лимит включает токены размышления — "
+                f"нужен запас."
+            )
+
         if not content:
             # Пустой ответ бывает при срабатывании фильтров безопасности
             # провайдера. Считаем временным: следующая формулировка может пройти.
-            finish_reason = (choices[0] or {}).get("finish_reason")
             raise LLMUnavailable(f"Модель вернула пустой ответ (finish_reason={finish_reason})")
 
         return content
