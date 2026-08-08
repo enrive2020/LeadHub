@@ -14,11 +14,14 @@ from zoneinfo import ZoneInfo
 import gspread
 from google.auth.exceptions import TransportError
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
+from gspread.utils import rowcol_to_a1
 from requests.exceptions import RequestException
 
+from app.ai.schemas import GRADE_LABELS, Qualification
 from app.config import settings
 from app.domain.lead import Lead
 from app.logging_setup import get_logger
+from app.pipeline.ai_wait import qualification_or_none
 from app.pipeline.base import Step
 from app.pipeline.errors import PermanentError, RetryableError
 
@@ -28,9 +31,13 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# Заголовки таблицы. Порядок задаёт порядок колонок и меняться не должен:
-# существующие строки под него уже записаны.
-HEADER = ["Дата", "ID лида", "Источник", "Имя", "Телефон", "Email", "Сообщение"]
+# Заголовки таблицы. Порядок задаёт порядок колонок; менять порядок и смысл
+# существующих колонок нельзя — под них уже записаны строки. ДОБАВЛЯТЬ в конец
+# можно: старые строки просто останутся с пустыми хвостами.
+HEADER = [
+    "Дата", "ID лида", "Источник", "Имя", "Телефон", "Email", "Сообщение",
+    "Оценка", "Балл", "Причина", "Черновик ответа",
+]
 
 # Колонка с ID лида (B) — по ней проверяем, не записан ли лид уже.
 LEAD_ID_COLUMN = 2
@@ -115,10 +122,24 @@ class SheetsStep(Step):
         return worksheet
 
     def _ensure_header(self, worksheet: "Worksheet") -> None:
-        """Дописывает строку заголовков, если лист пустой."""
-        if not worksheet.row_values(1):
-            worksheet.append_row(HEADER, value_input_option="RAW")
-            logger.info("Записаны заголовки таблицы")
+        """Приводит строку заголовков к актуальной.
+
+        Не просто «пишет, если пусто»: набор колонок со временем растёт (в
+        Фазе 4 добавились колонки AI), и у клиента уже работает лист со старым
+        заголовком. Это та же задача, что миграция схемы базы, только для
+        таблицы — и решать её надо так же явно.
+        """
+        # Лист мог быть создан узким — расширяем, иначе запись в новую колонку
+        # упрётся в границы сетки.
+        if worksheet.col_count < len(HEADER):
+            worksheet.resize(cols=len(HEADER))
+
+        if worksheet.row_values(1) == HEADER:
+            return
+
+        last_cell = rowcol_to_a1(1, len(HEADER))  # например "K1"
+        worksheet.update(values=[HEADER], range_name=f"A1:{last_cell}")
+        logger.info("Заголовки таблицы приведены к актуальным (%s колонок)", len(HEADER))
 
     def _worksheet_or_connect(self) -> "Worksheet":
         if self._worksheet is None:
@@ -128,6 +149,12 @@ class SheetsStep(Step):
     # -- выполнение шага --------------------------------------------------
 
     def run(self, lead: Lead) -> None:
+        # Ждём оценку до разумного предела, но не в ущерб самой записи.
+        # Бросает StepDeferred, если ещё рано, — воркер вернётся позже.
+        # Вызов ДО обращения к Google: незачем открывать соединение, чтобы
+        # тут же отложить задачу.
+        qualification = qualification_or_none(lead)
+
         try:
             worksheet = self._worksheet_or_connect()
 
@@ -147,7 +174,7 @@ class SheetsStep(Step):
                 return
 
             worksheet.append_row(
-                self._to_row(lead),
+                self._to_row(lead, qualification),
                 # RAW, а не USER_ENTERED — иначе Sheets попытается ИСТОЛКОВАТЬ
                 # значения: телефон "+79991112233" превратится в формулу и
                 # покажет ошибку, а длинные числа схлопнутся в экспоненту.
@@ -198,14 +225,18 @@ class SheetsStep(Step):
 
     # -- форматирование ---------------------------------------------------
 
-    def _to_row(self, lead: Lead) -> list[str]:
+    def _to_row(self, lead: Lead, qualification: Qualification | None) -> list[str]:
         """Готовит строку таблицы.
 
         Внутри системы время в UTC, а владельцу показываем его местное —
         человек не должен пересчитывать часовые пояса в голове.
+
+        Колонки AI заполняются, только если оценка есть. Пустые ячейки честнее
+        прочерка или слова «нет»: сразу видно, что данных не было, а не что
+        модель так решила.
         """
         local_time = lead.received_at.astimezone(self._timezone)
-        return [
+        row = [
             local_time.strftime("%d.%m.%Y %H:%M"),
             lead.id,
             lead.source,
@@ -214,3 +245,14 @@ class SheetsStep(Step):
             lead.email or "",
             lead.message or "",
         ]
+
+        if qualification is None:
+            row += ["", "", "", ""]
+        else:
+            row += [
+                GRADE_LABELS[qualification.grade],
+                str(qualification.score),
+                qualification.reason,
+                qualification.reply_draft,
+            ]
+        return row

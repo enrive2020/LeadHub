@@ -304,6 +304,20 @@ def enqueue_missing(steps: list[str]) -> int:
     return created
 
 
+def get_status(lead_id: str, step: str) -> str | None:
+    """Статус конкретного шага для конкретного лида. None — задачи нет.
+
+    Нужен шагам, которые хотят дождаться результата соседнего шага: по статусу
+    видно, есть ли смысл ждать дальше или сосед уже сдался.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT status FROM lead_tasks WHERE lead_id = ? AND step = ?",
+            (lead_id, step),
+        ).fetchone()
+    return row["status"] if row else None
+
+
 def requeue_dead(step: str | None = None) -> int:
     """Возвращает похороненные задачи в очередь. Возвращает число возвращённых.
 

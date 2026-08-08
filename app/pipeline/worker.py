@@ -25,7 +25,7 @@ from types import FrameType
 
 from app.config import settings
 from app.logging_setup import get_logger, setup_logging
-from app.pipeline.errors import PermanentError
+from app.pipeline.errors import PermanentError, StepDeferred
 from app.pipeline.registry import STEPS_BY_NAME
 from app.pipeline.retry import compute_delay
 from app.storage import lead_repository, task_repository
@@ -139,6 +139,16 @@ class Worker:
 
         try:
             step.run(lead)
+
+        except StepDeferred as error:
+            # Не сбой: шагу не хватает данных, которые вот-вот появятся.
+            # Возвращаем задачу в очередь с ПРЕЖНИМ счётчиком попыток —
+            # ожидание не должно расходовать право на повтор.
+            task_repository.schedule_retry(task.id, task.attempts, error.delay, str(error))
+            logger.info(
+                "[%s] лид %s: %s — вернусь через %.0f сек",
+                task.step, lead.id[:8], error, error.delay,
+            )
 
         except PermanentError as error:
             # Шаг сам сказал: повтор не поможет. Не тратим попытки.

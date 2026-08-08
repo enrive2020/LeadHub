@@ -19,9 +19,11 @@ from zoneinfo import ZoneInfo
 import requests
 from requests.exceptions import RequestException
 
+from app.ai.schemas import GRADE_LABELS, Qualification
 from app.config import settings
 from app.domain.lead import Lead
 from app.logging_setup import get_logger
+from app.pipeline.ai_wait import qualification_or_none
 from app.pipeline.base import Step
 from app.pipeline.errors import PermanentError, RetryableError
 
@@ -72,10 +74,15 @@ class TelegramStep(Step):
         лишнее сообщение — секунда раздражения, пропущенное — потерянный клиент.
         Когда выбора нет, ошибаться надо в дешёвую сторону.
         """
+        # Оценка желательна, но не обязательна: ждём до предела из настроек,
+        # после чего уведомляем без неё. Владелец узнаёт о клиенте в любом
+        # случае — см. app/pipeline/ai_wait.py.
+        qualification = qualification_or_none(lead)
+
         url = f"{API_BASE}/bot{settings.telegram_bot_token}/sendMessage"
         payload = {
             "chat_id": settings.telegram_chat_id,
-            "text": self._render(lead),
+            "text": self._render(lead, qualification),
             "parse_mode": "HTML",
             # Не разворачивать превью ссылок: карточка лида должна быть компактной.
             "link_preview_options": {"is_disabled": True},
@@ -132,7 +139,7 @@ class TelegramStep(Step):
 
     # -- форматирование ---------------------------------------------------
 
-    def _render(self, lead: Lead) -> str:
+    def _render(self, lead: Lead, qualification: Qualification | None) -> str:
         """Собирает карточку лида.
 
         БЕЗОПАСНОСТЬ: всё, что пришло от пользователя, ОБЯЗАТЕЛЬНО прогоняется
@@ -166,6 +173,19 @@ class TelegramStep(Step):
                 message = message[:MAX_MESSAGE_TEXT] + "…"
             lines.append("")
             lines.append(f"💬 {html.escape(message)}")
+
+        if qualification is not None:
+            lines.append("")
+            lines.append(
+                f"{GRADE_LABELS[qualification.grade]} · "
+                f"<b>{qualification.score}/100</b>"
+            )
+            lines.append(f"<i>{html.escape(qualification.reason)}</i>")
+            lines.append("")
+            lines.append("<b>Черновик ответа:</b>")
+            # <blockquote> в Telegram даёт визуально отделённый блок, из
+            # которого удобно скопировать текст целиком и отправить клиенту.
+            lines.append(f"<blockquote>{html.escape(qualification.reply_draft)}</blockquote>")
 
         lines.append("")
         lines.append(
