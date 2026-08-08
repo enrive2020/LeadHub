@@ -78,9 +78,20 @@ class Settings(BaseSettings):
     # Имя листа внутри таблицы. Создастся сам, если его нет.
     google_worksheet_name: str = "Лиды"
 
+    # --- Telegram ---
+    # Токен бота от @BotFather. Это ПАРОЛЬ бота: кто им владеет, тот и бот.
+    telegram_bot_token: str | None = None
+    # Куда слать уведомления: id личного чата, группы или канала.
+    telegram_chat_id: str | None = None
+
     # Часовой пояс для дат, которые читает человек. Внутри система живёт
     # в UTC, а владельцу показываем его местное время.
     display_timezone: str = "Europe/Moscow"
+
+    @property
+    def telegram_configured(self) -> bool:
+        """Настроены ли уведомления. Нет — шаг просто не встанет в пайплайн."""
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
     @property
     def google_credentials_path(self) -> Path | None:

@@ -15,13 +15,13 @@ from app.logging_setup import get_logger
 from app.pipeline.base import Step
 from app.pipeline.steps.log_step import LogStep
 from app.pipeline.steps.sheets_step import SheetsStep
+from app.pipeline.steps.telegram_step import TelegramStep
 
 logger = get_logger(__name__)
 
 #: Шаги, которые ставятся каждому новому лиду.
 ENABLED_STEPS: list[Step] = [
     LogStep(),
-    # Фаза 3: TelegramStep()
     # Фаза 4: QualifyStep()
 ]
 
@@ -38,6 +38,14 @@ else:
     logger.warning(
         "Google Sheets не настроен (нужны GOOGLE_SHEET_ID и файл ключа) — "
         "шаг записи в таблицу отключён"
+    )
+
+if settings.telegram_configured:
+    ENABLED_STEPS.append(TelegramStep())
+else:
+    logger.warning(
+        "Telegram не настроен (нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID) — "
+        "шаг уведомлений отключён"
     )
 
 #: Имена шагов — их пишем в очередь при приёме лида.

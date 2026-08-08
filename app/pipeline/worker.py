@@ -168,12 +168,16 @@ class Worker:
             task_repository.mark_dead(task.id, task.lead_id, attempt, reason)
             return
 
-        delay = compute_delay(attempt)
+        # Если сервис сам назвал срок — слушаемся его, своя формула тут хуже.
+        requested = getattr(error, "retry_after", None)
+        delay = float(requested) if requested else compute_delay(attempt)
+
         next_attempt = task_repository.schedule_retry(task.id, attempt, delay, reason)
         logger.warning(
-            "[%s] лид %s: попытка %s/%s не удалась (%s). Повтор через %.1f сек (в %s)",
+            "[%s] лид %s: попытка %s/%s не удалась (%s). Повтор через %.1f сек (в %s)%s",
             task.step, task.lead_id[:8], attempt, settings.retry_max_attempts,
             reason, delay, next_attempt.strftime("%H:%M:%S"),
+            " — задержку назначил сам сервис" if requested else "",
         )
 
 

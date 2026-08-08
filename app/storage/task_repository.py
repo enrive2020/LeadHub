@@ -304,6 +304,56 @@ def enqueue_missing(steps: list[str]) -> int:
     return created
 
 
+def requeue_dead(step: str | None = None) -> int:
+    """Возвращает похороненные задачи в очередь. Возвращает число возвращённых.
+
+    ЗАЧЕМ. Задача уходит в dead letter, когда повторять бессмысленно: нет
+    доступа к таблице, боту не написали первым, неверный ключ. Причина при этом
+    почти всегда УСТРАНИМА — человек чинит настройку за минуту. Но без этой
+    команды исправленная причина ничего не меняет: лиды так и лежат мёртвыми.
+
+    Dead letter имеет смысл только в паре с кнопкой "попробовать снова".
+    Иначе это не полка, а всё та же корзина, только с красивым названием.
+
+    Счётчик попыток обнуляем: причина другая, история старых попыток
+    к новым отношения не имеет.
+    """
+    now = _iso(_now())
+    with get_connection() as conn:
+        if step:
+            cursor = conn.execute(
+                """
+                UPDATE lead_tasks
+                   SET status = 'pending', attempts = 0,
+                       next_attempt_at = ?, updated_at = ?
+                 WHERE status = 'dead' AND step = ?
+                """,
+                (now, now, step),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE lead_tasks
+                   SET status = 'pending', attempts = 0,
+                       next_attempt_at = ?, updated_at = ?
+                 WHERE status = 'dead'
+                """,
+                (now, now),
+            )
+        requeued = cursor.rowcount
+
+        # Лиды, у которых снова появилась работа, больше не "failed".
+        if requeued:
+            conn.execute(
+                """
+                UPDATE leads SET status = 'processing'
+                 WHERE id IN (SELECT lead_id FROM lead_tasks WHERE status = 'pending')
+                """
+            )
+
+    return requeued
+
+
 def list_dead() -> list[dict[str, object]]:
     """Задачи, требующие ручного разбора."""
     with get_connection() as conn:
