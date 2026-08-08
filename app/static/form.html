@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LeadHub — тестовая форма</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    p.sub { opacity: .7; margin-top: 0; font-size: .9rem; }
+    label { display: block; margin-top: 1rem; font-size: .9rem; font-weight: 600; }
+    input, textarea {
+      width: 100%; padding: .55rem .7rem; margin-top: .25rem; font: inherit;
+      border: 1px solid rgba(128,128,128,.45); border-radius: .4rem;
+      background: transparent; color: inherit; box-sizing: border-box;
+    }
+    textarea { min-height: 5rem; resize: vertical; }
+    button {
+      margin-top: 1.5rem; padding: .6rem 1.4rem; font: inherit; font-weight: 600;
+      border: 0; border-radius: .4rem; background: #2563eb; color: #fff; cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: default; }
+    #result {
+      margin-top: 1.5rem; padding: .8rem 1rem; border-radius: .4rem;
+      white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace;
+      font-size: .85rem; display: none;
+    }
+    .ok   { background: rgba(34,197,94,.15);  border: 1px solid rgba(34,197,94,.5); }
+    .warn { background: rgba(234,179,8,.15);  border: 1px solid rgba(234,179,8,.5); }
+    .err  { background: rgba(239,68,68,.15);  border: 1px solid rgba(239,68,68,.5); }
+  </style>
+</head>
+<body>
+  <h1>Оставить заявку</h1>
+  <p class="sub">Тестовая форма — изображает форму на сайте клиента.
+     Отправляет POST на <code>/webhook/site</code>.</p>
+
+  <form id="lead-form">
+    <label>Имя <input name="name" placeholder="Иван Петров"></label>
+    <label>Телефон <input name="phone" placeholder="+7 912 345-67-89"></label>
+    <label>Email <input name="email" placeholder="ivan@mail.ru"></label>
+    <label>Сообщение <textarea name="message" placeholder="Нужен сайт для магазина"></textarea></label>
+    <button type="submit">Отправить</button>
+  </form>
+
+  <div id="result"></div>
+
+<script>
+const form = document.getElementById("lead-form");
+const result = document.getElementById("result");
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = form.querySelector("button");
+  button.disabled = true;
+
+  // Собираем поля формы в обычный объект и шлём JSON-ом.
+  // utm_source добавлен нарочно: это поле НЕ описано в схеме источника,
+  // и оно наглядно показывает, что неизвестные данные не теряются —
+  // они целиком сохраняются в колонку raw_json.
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.utm_source = "demo-form";
+
+  try {
+    const response = await fetch("/webhook/site", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+
+    if (response.ok) {
+      result.className = data.duplicate ? "warn" : "ok";
+      result.textContent = data.duplicate
+        ? `Это повтор — заявка уже принята ранее.\nlead_id: ${data.lead_id}`
+        : `Заявка принята.\nlead_id: ${data.lead_id}`;
+    } else {
+      result.className = "err";
+      result.textContent = `HTTP ${response.status}\n${JSON.stringify(data.detail, null, 2)}`;
+    }
+  } catch (error) {
+    // Сюда попадаем, если сервер вообще недоступен.
+    result.className = "err";
+    result.textContent = `Сервер не ответил: ${error}`;
+  } finally {
+    result.style.display = "block";
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
