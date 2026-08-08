@@ -107,7 +107,7 @@ def receive_site_form(  # noqa: D401  (обработчик, а не описа�
         # повтор тех же кривых данных даст тот же результат.
         logger.info("Отклонена заявка с некорректными данными: %s", error.errors())
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=[
                 {"field": ".".join(str(p) for p in err["loc"]), "error": err["msg"]}
                 for err in error.errors()
