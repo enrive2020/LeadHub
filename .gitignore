@@ -1,0 +1,30 @@
+# --- Секреты: НИКОГДА не попадают в репозиторий ---
+.env
+.env.local
+*.key
+*.pem
+credentials.json          # ключ Google service account (появится в Фазе 2)
+service_account*.json
+
+# --- Виртуальное окружение ---
+.venv/
+venv/
+
+# --- Артефакты Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# --- Данные приложения (локальная БД, логи) ---
+data/
+*.db
+*.sqlite3
+*.log
+
+# --- IDE / ОС ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
