@@ -14,7 +14,7 @@ from app import __version__
 from app.api import webhooks
 from app.config import BASE_DIR, settings
 from app.logging_setup import get_logger, setup_logging
-from app.storage import lead_repository, task_repository
+from app.storage import ai_repository, lead_repository, task_repository
 from app.storage.database import init_db
 
 logger = get_logger(__name__)
@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
             "version": __version__,
             "leads": lead_repository.count_by_status(),
             "tasks": task_repository.stats(),
+            "ai": ai_repository.count_by_grade(),
         }
 
     @application.get("/", tags=["Служебное"], include_in_schema=False)

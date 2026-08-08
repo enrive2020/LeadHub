@@ -14,6 +14,7 @@ from app.config import settings
 from app.logging_setup import get_logger
 from app.pipeline.base import Step
 from app.pipeline.steps.log_step import LogStep
+from app.pipeline.steps.qualify_step import QualifyStep
 from app.pipeline.steps.sheets_step import SheetsStep
 from app.pipeline.steps.telegram_step import TelegramStep
 
@@ -22,7 +23,9 @@ logger = get_logger(__name__)
 #: Шаги, которые ставятся каждому новому лиду.
 ENABLED_STEPS: list[Step] = [
     LogStep(),
-    # Фаза 4: QualifyStep()
+    # Оценка работает всегда: на заглушке — без сети и без денег,
+    # на настоящем провайдере — по ключу из .env.
+    QualifyStep(),
 ]
 
 # Шаг подключается только если интеграция настроена. Иначе проект остаётся

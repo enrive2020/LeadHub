@@ -152,10 +152,41 @@ PRAGMA user_version = 2;
 COMMIT;
 """
 
+# --- Миграция 3: результат работы AI ---------------------------------------
+# Отдельная таблица, а не колонки в leads. Причины:
+#   * у лида оценки может не быть вовсе (AI выключен, шаг ещё не отработал,
+#     модель не справилась) — отсутствие строки честнее, чем NULL-ы;
+#   * состав полей AI будет меняться чаще, чем состав полей лида;
+#   * leads остаётся про факты («что прислал клиент»), lead_ai — про суждения
+#     («что об этом думает модель»). Смешивать факты и суждения в одной
+#     таблице — верный способ однажды перепутать их и в коде.
+#
+# model — какая модель выдала оценку. Обязательно: сменишь модель, и старые
+# оценки станут несравнимы с новыми, а понять это без пометки будет нечем.
+_MIGRATION_3_AI = """
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS lead_ai (
+    lead_id     TEXT PRIMARY KEY REFERENCES leads (id) ON DELETE CASCADE,
+    grade       TEXT NOT NULL,
+    score       INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    reply_draft TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_ai_grade ON lead_ai (grade);
+
+PRAGMA user_version = 3;
+COMMIT;
+"""
+
 # Список миграций по порядку. Добавляя новую, дописывай в конец.
 _MIGRATIONS: list[tuple[int, str]] = [
     (1, _MIGRATION_1_LEADS),
     (2, _MIGRATION_2_TASKS),
+    (3, _MIGRATION_3_AI),
 ]
 
 

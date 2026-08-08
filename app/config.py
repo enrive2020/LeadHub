@@ -84,6 +84,22 @@ class Settings(BaseSettings):
     # Куда слать уведомления: id личного чата, группы или канала.
     telegram_chat_id: str | None = None
 
+    # --- LLM ---
+    # fake — заглушка без сети и без денег; openai_compatible — настоящий API.
+    llm_provider: Literal["fake", "openai_compatible"] = "fake"
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+
+    # Низкая температура: нам нужна воспроизводимая классификация,
+    # а не разнообразие формулировок. Подробнее — в app/llm/base.py.
+    llm_temperature: float = 0.2
+    # Потолок длины ответа. Защита и от разговорчивости, и от счёта за токены.
+    llm_max_tokens: int = 700
+    # Сколько раз просить модель исправиться, если ответ не прошёл валидацию.
+    # Больше двух почти никогда не помогает — только жжёт деньги.
+    llm_max_parse_attempts: int = 2
+
     # Часовой пояс для дат, которые читает человек. Внутри система живёт
     # в UTC, а владельцу показываем его местное время.
     display_timezone: str = "Europe/Moscow"
