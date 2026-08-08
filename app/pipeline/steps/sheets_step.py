@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import gspread
+from google.auth.exceptions import TransportError
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 from requests.exceptions import RequestException
 
@@ -43,6 +44,20 @@ _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 #   400 — некорректный запрос      401 — ключ не принят
 #   403 — таблица не расшарена     404 — таблицы с таким ID нет
 _PERMANENT_STATUSES = {400, 401, 403, 404}
+
+# ВАЖНАЯ ТОНКОСТЬ. Google отдаёт 403 не только на "нет доступа", но и на
+# превышение квоты. Если считать любой 403 неустранимым, то при всплеске заявок
+# (или просто при пачке ретраев) лиды начнут уходить в dead letter вместо того,
+# чтобы подождать полминуты и спокойно записаться.
+#
+# Отличить можно только по тексту причины — отдельного кода у Google нет.
+# Этот список приходится держать вручную; такова цена работы с чужим API.
+_RATE_LIMIT_MARKERS = (
+    "ratelimitexceeded",
+    "userratelimitexceeded",
+    "quota",
+    "resource_exhausted",
+)
 
 
 def _status_code(error: APIError) -> int | None:
@@ -145,6 +160,13 @@ class SheetsStep(Step):
             self._worksheet = None
             self._raise_classified(error)
 
+        except TransportError as error:
+            # Не достучались до сервера авторизации Google (oauth2.googleapis.com).
+            # Своя ветка нужна ради внятного сообщения: без неё в логе оказывается
+            # трёхэтажная простыня про ProxyError, из которой не видно сути.
+            self._worksheet = None
+            raise RetryableError("Не удалось получить токен Google: сеть недоступна") from error
+
         except RequestException as error:
             # Сеть: таймаут, DNS, обрыв. Всегда имеет смысл повторить.
             self._worksheet = None
@@ -157,6 +179,12 @@ class SheetsStep(Step):
         воркер такого знать не обязан и не должен.
         """
         status = _status_code(error)
+        text = str(error).lower()
+
+        # Квота маскируется под 403 — проверяем ДО общей проверки на постоянные
+        # ошибки, иначе лид умрёт из-за временного лимита.
+        if any(marker in text for marker in _RATE_LIMIT_MARKERS):
+            raise RetryableError(f"Превышена квота Google (HTTP {status})") from error
 
         if status in _PERMANENT_STATUSES:
             raise PermanentError(f"Google отказал (HTTP {status}): {error}") from error
