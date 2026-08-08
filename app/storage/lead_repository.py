@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 from app.domain.lead import Lead, LeadStatus
 from app.logging_setup import get_logger
+from app.storage import task_repository
 from app.storage.database import get_connection
 
 logger = get_logger(__name__)
@@ -50,8 +51,8 @@ def _row_to_lead(row: sqlite3.Row) -> Lead:
     )
 
 
-def save(lead: Lead) -> SaveResult:
-    """Сохраняет лид. Повторный вызов с тем же dedup_key ничего не меняет.
+def save(lead: Lead, steps: list[str]) -> SaveResult:
+    """Сохраняет лид и ставит задачи на его обработку. Одной транзакцией.
 
     Идемпотентность обеспечена конструкцией `ON CONFLICT ... DO NOTHING`:
     если UNIQUE-индекс по dedup_key нарушен, SQLite молча пропускает вставку
@@ -61,6 +62,11 @@ def save(lead: Lead) -> SaveResult:
     успевает вклиниться параллельный запрос, оба увидят "лида нет" и оба
     вставят. Это состояние гонки. Атомарная проверка на стороне базы —
     единственный надёжный вариант.
+
+    Почему задачи создаются здесь, а не отдельным вызовом после: они должны
+    попасть в базу той же транзакцией, что и лид. Иначе процесс, умерший
+    между двумя вызовами, оставит лид без единой задачи — он будет лежать
+    в базе, и никто никогда его не обработает. Тихая потеря, худший вид.
     """
     with get_connection() as conn:
         cursor = conn.execute(
@@ -99,7 +105,10 @@ def save(lead: Lead) -> SaveResult:
             )
             return SaveResult(lead=existing, is_duplicate=True)
 
-    logger.info("Принят %s", lead.short_repr())
+        # Та же транзакция: лид и его задачи появляются в базе одновременно.
+        task_repository.create_tasks(conn, lead.id, steps)
+
+    logger.info("Принят %s, шагов в очереди: %s", lead.short_repr(), len(steps))
     return SaveResult(lead=lead, is_duplicate=False)
 
 

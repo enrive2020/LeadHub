@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.api.security import verify_webhook_secret
 from app.logging_setup import get_logger
+from app.pipeline.registry import STEP_NAMES
 from app.sources.site_form import SiteFormPayload, to_lead
 from app.storage import lead_repository
 
@@ -116,11 +117,15 @@ def receive_site_form(  # noqa: D401  (обработчик, а не описа�
     # Перевод в единый формат. Дальше система не знает, что это была форма с сайта.
     lead = to_lead(payload, raw)
 
-    # Точка, после которой лид считается принятым: он на диске.
+    # Точка, после которой лид считается принятым: он на диске вместе
+    # с задачами на обработку — одной транзакцией.
     # Исключение здесь НЕ перехватываем осознанно — пусть превратится в 500,
     # и отправитель повторит запрос. Ответить 200, не сохранив лид, — худшее,
     # что можно сделать: отправитель успокоится, а заявки нет.
-    result = lead_repository.save(lead)
+    #
+    # Список шагов приходит из реестра пайплайна: приёмник не знает, что это
+    # за шаги и что они делают. Его дело — поставить работу в очередь.
+    result = lead_repository.save(lead, steps=STEP_NAMES)
 
     return WebhookResponse(
         lead_id=result.lead.id,
